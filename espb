@@ -1,0 +1,302 @@
+local ESP = {Players = {}}
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Camera = workspace.CurrentCamera
+
+ESP.Settings = {
+    Enabled = true,
+    Chams = true,
+    Box = true,
+    HealthBar = true,
+    Text = true,
+    Tracer = true,
+    ViewAngle = true,
+    OffScreenArrow = true,
+    Outline = true,
+    BoldText = false,
+    MaxDistance = 5000,
+    ArrowRadius = 30,
+    ArrowSize = 2,
+    TextSize = 12,
+    TextFont = 1
+}
+
+ESP.Fonts = {
+    [1] = Enum.Font.Roboto,
+    [2] = Enum.Font.Legacy,
+    [3] = Enum.Font.SourceSans,
+    [4] = Enum.Font.Code,
+    [5] = Enum.Font.Gotham
+}
+
+function ESP:Create(player)
+    if self.Players[player] then return end
+    
+    local objects = {}
+    self.Players[player] = {Object = objects, Player = player}
+    
+    objects.Highlight = Instance.new("Highlight")
+    objects.Highlight.Name = player.Name.."_Chams"
+    objects.Highlight.OutlineTransparency = 1
+    objects.Highlight.FillTransparency = 0.5
+    objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    
+    objects.Box = Drawing.new("Square")
+    objects.Box.Thickness = 1
+    objects.Box.Filled = false
+    
+    objects.HealthBarOutline = Drawing.new("Square")
+    objects.HealthBar = Drawing.new("Square")
+    objects.HealthBar.Filled = true
+    
+    -- Text
+    objects.Text = Drawing.new("Text")
+    objects.Text.Center = true
+    
+    -- Tracer
+    objects.Tracer = Drawing.new("Line")
+    
+    -- View Angle
+    objects.ViewAngle = Drawing.new("Line")
+    
+    -- Off-screen arrow
+    objects.Arrow = Drawing.new("Triangle")
+end
+
+-- Update ESP settings
+function ESP:UpdateSettings(newSettings)
+    for setting, value in pairs(newSettings) do
+        if self.Settings[setting] ~= nil then
+            -- Apply constraints
+            if setting == "ArrowRadius" then
+                self.Settings[setting] = math.clamp(value, 1, 100)
+            elseif setting == "ArrowSize" then
+                self.Settings[setting] = math.clamp(value, 1, 5)
+            elseif setting == "TextSize" then
+                self.Settings[setting] = math.clamp(value, 1, 24)
+            elseif setting == "TextFont" then
+                self.Settings[setting] = math.clamp(value, 1, 5)
+            else
+                self.Settings[setting] = value
+            end
+        end
+    end
+end
+
+-- Update ESP visuals
+function ESP:Update()
+    if not self.Settings.Enabled then return end
+    
+    local cameraPos = Camera.CFrame.Position
+    
+    for player, data in pairs(self.Players) do
+        local character = player.Character
+        local objects = data.Object
+        
+        if character and player ~= Players.LocalPlayer then
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            local humanoid = character:FindFirstChild("Humanoid")
+            
+            if rootPart and humanoid then
+                local position, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+                local distance = (rootPart.Position - cameraPos).Magnitude
+                
+                if distance <= self.Settings.MaxDistance then
+                    -- Calculate bounding box dimensions
+                    local size = Vector3.new(4, 6, 0)
+                    local offset = CFrame.new(0, -size.Y/2, 0)
+                    local corners = {
+                        topRight = Camera:WorldToViewportPoint((rootPart.CFrame * offset * CFrame.new(size.X/2, size.Y/2, 0)).Position),
+                        topLeft = Camera:WorldToViewportPoint((rootPart.CFrame * offset * CFrame.new(-size.X/2, size.Y/2, 0)).Position),
+                        bottomRight = Camera:WorldToViewportPoint((rootPart.CFrame * offset * CFrame.new(size.X/2, -size.Y/2, 0)).Position),
+                        bottomLeft = Camera:WorldToViewportPoint((rootPart.CFrame * offset * CFrame.new(-size.X/2, -size.Y/2, 0)).Position)
+                    }
+                    
+                    -- Chams
+                    if self.Settings.Chams then
+                        objects.Highlight.Adornee = character
+                        objects.Highlight.Enabled = true
+                    else
+                        objects.Highlight.Enabled = false
+                    end
+                    
+                    if onScreen then
+                        -- Box
+                        if self.Settings.Box then
+                            objects.Box.Visible = true
+                            objects.Box.Size = Vector2.new(
+                                math.abs(corners.topRight.X - corners.topLeft.X),
+                                math.abs(corners.topRight.Y - corners.bottomRight.Y)
+                            )
+                            objects.Box.Position = Vector2.new(
+                                corners.topLeft.X,
+                                corners.topLeft.Y
+                            )
+                        else
+                            objects.Box.Visible = false
+                        end
+                        
+                        -- Health Bar
+                        if self.Settings.HealthBar then
+                            local healthPercent = humanoid.Health / humanoid.MaxHealth
+                            local barHeight = objects.Box.Size.Y
+                            local barWidth = 4
+                            
+                            -- Outline
+                            objects.HealthBarOutline.Visible = self.Settings.Outline
+                            objects.HealthBarOutline.Size = Vector2.new(barWidth, barHeight)
+                            objects.HealthBarOutline.Position = objects.Box.Position - Vector2.new(6, 0)
+                            objects.HealthBarOutline.Color = Color3.new(0, 0, 0)
+                            
+                            -- Fill
+                            objects.HealthBar.Visible = true
+                            objects.HealthBar.Size = Vector2.new(barWidth - 2, barHeight * healthPercent - 2)
+                            objects.HealthBar.Position = objects.HealthBarOutline.Position + 
+                                Vector2.new(1, 1 + barHeight * (1 - healthPercent))
+                            objects.HealthBar.Color = Color3.new(1 - healthPercent, healthPercent, 0)
+                        else
+                            objects.HealthBar.Visible = false
+                            objects.HealthBarOutline.Visible = false
+                        end
+                        
+                        -- Text
+                        if self.Settings.Text then
+                            objects.Text.Visible = true
+                            objects.Text.Text = string.format("%s [%dm]", player.Name, math.floor(distance))
+                            objects.Text.Position = Vector2.new(
+                                objects.Box.Position.X + objects.Box.Size.X / 2,
+                                objects.Box.Position.Y - 20
+                            )
+                            objects.Text.Size = self.Settings.TextSize
+                            objects.Text.Font = self.Fonts[self.Settings.TextFont]
+                        else
+                            objects.Text.Visible = false
+                        end
+                        
+                        -- Tracer
+                        if self.Settings.Tracer then
+                            objects.Tracer.Visible = true
+                            objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                            objects.Tracer.To = Vector2.new(position.X, position.Y)
+                        else
+                            objects.Tracer.Visible = false
+                        end
+                        
+                        -- View Angle
+                        if self.Settings.ViewAngle then
+                            objects.ViewAngle.Visible = true
+                            local lookDir = rootPart.CFrame.LookVector * 5
+                            local lookEnd = Camera:WorldToViewportPoint(rootPart.Position + lookDir)
+                            objects.ViewAngle.From = Vector2.new(position.X, position.Y)
+                            objects.ViewAngle.To = Vector2.new(lookEnd.X, lookEnd.Y)
+                        else
+                            objects.ViewAngle.Visible = false
+                        end
+                        
+                        -- Hide off-screen elements
+                        objects.Arrow.Visible = false
+                    else
+                        -- Off-screen arrow
+                        if self.Settings.OffScreenArrow then
+                            objects.Arrow.Visible = true
+                            
+                            local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                            local dir = (rootPart.Position - cameraPos).Unit
+                            local angle = math.atan2(dir.Z, dir.X)
+                            
+                            local radius = self.Settings.ArrowRadius
+                            local size = self.Settings.ArrowSize * 5
+                            
+                            local pos = center + Vector2.new(
+                                math.cos(angle) * radius,
+                                math.sin(angle) * radius
+                            )
+                            
+                            local points = {
+                                pos + Vector2.new(math.cos(angle) * size, math.sin(angle) * size),
+                                pos + Vector2.new(math.cos(angle + 2.5) * size, math.sin(angle + 2.5) * size),
+                                pos + Vector2.new(math.cos(angle - 2.5) * size, math.sin(angle - 2.5) * size)
+                            }
+                            
+                            objects.Arrow.PointA = points[1]
+                            objects.Arrow.PointB = points[2]
+                            objects.Arrow.PointC = points[3]
+                        else
+                            objects.Arrow.Visible = false
+                        end
+                        
+                        -- Hide on-screen elements
+                        objects.Box.Visible = false
+                        objects.HealthBar.Visible = false
+                        objects.HealthBarOutline.Visible = false
+                        objects.Text.Visible = false
+                        objects.Tracer.Visible = false
+                        objects.ViewAngle.Visible = false
+                    end
+                else
+                    -- Out of range - hide all
+                    objects.Highlight.Enabled = false
+                    objects.Box.Visible = false
+                    objects.HealthBar.Visible = false
+                    objects.HealthBarOutline.Visible = false
+                    objects.Text.Visible = false
+                    objects.Tracer.Visible = false
+                    objects.ViewAngle.Visible = false
+                    objects.Arrow.Visible = false
+                end
+            end
+        else
+            -- Player not valid - hide all
+            if objects.Highlight then
+                objects.Highlight.Enabled = false
+            end
+            objects.Box.Visible = false
+            objects.HealthBar.Visible = false
+            objects.HealthBarOutline.Visible = false
+            objects.Text.Visible = false
+            objects.Tracer.Visible = false
+            objects.ViewAngle.Visible = false
+            objects.Arrow.Visible = false
+        end
+    end
+end
+
+-- Initialize ESP
+function ESP:Init()
+    -- Create ESP for existing players
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= Players.LocalPlayer then
+            self:Create(player)
+        end
+    end
+    
+    -- Set up new players
+    Players.PlayerAdded:Connect(function(player)
+        self:Create(player)
+    end)
+    
+    -- Clean up leaving players
+    Players.PlayerRemoving:Connect(function(player)
+        local data = self.Players[player]
+        if data then
+            if data.Object.Highlight then
+                data.Object.Highlight:Destroy()
+            end
+            data.Object.Box:Remove()
+            data.Object.HealthBar:Remove()
+            data.Object.HealthBarOutline:Remove()
+            data.Object.Text:Remove()
+            data.Object.Tracer:Remove()
+            data.Object.ViewAngle:Remove()
+            data.Object.Arrow:Remove()
+            self.Players[player] = nil
+        end
+    end)
+    
+    -- Start update loop
+    RunService.Heartbeat:Connect(function()
+        self:Update()
+    end)
+end
+
+return ESP
