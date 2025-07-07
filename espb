@@ -1,8 +1,10 @@
+-- ESP Library for Roblox
 local ESP = {Players = {}}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Camera = workspace.CurrentCamera
 
+-- Default settings with constraints
 ESP.Settings = {
     Enabled = true,
     Chams = true,
@@ -18,9 +20,19 @@ ESP.Settings = {
     ArrowRadius = 30,
     ArrowSize = 2,
     TextSize = 12,
-    TextFont = 1
+    TextFont = 1,
+    TeamCheck = false,
+    TeamColor = true,
+    BoxColor = Color3.new(1, 0, 0),
+    ChamsColor = Color3.new(1, 0, 0),
+    TextColor = Color3.new(1, 1, 1),
+    TracerColor = Color3.new(1, 1, 0),
+    ViewAngleColor = Color3.new(0, 0.6, 1),
+    ArrowColor = Color3.new(1, 0, 0),
+    HealthBarColor = Color3.new(0, 1, 0)
 }
 
+-- Font mapping
 ESP.Fonts = {
     [1] = Enum.Font.Roboto,
     [2] = Enum.Font.Legacy,
@@ -29,22 +41,33 @@ ESP.Fonts = {
     [5] = Enum.Font.Gotham
 }
 
+-- Color presets for team (if team color is enabled)
+ESP.Colors = {
+    Ally = Color3.fromRGB(0, 255, 0),
+    Enemy = Color3.fromRGB(255, 0, 0),
+    Neutral = Color3.fromRGB(255, 255, 0)
+}
+
+-- Create ESP objects for a player
 function ESP:Create(player)
     if self.Players[player] then return end
     
     local objects = {}
     self.Players[player] = {Object = objects, Player = player}
     
+    -- Chams Highlight
     objects.Highlight = Instance.new("Highlight")
     objects.Highlight.Name = player.Name.."_Chams"
     objects.Highlight.OutlineTransparency = 1
     objects.Highlight.FillTransparency = 0.5
     objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     
+    -- Box
     objects.Box = Drawing.new("Square")
     objects.Box.Thickness = 1
     objects.Box.Filled = false
     
+    -- Health Bar
     objects.HealthBarOutline = Drawing.new("Square")
     objects.HealthBar = Drawing.new("Square")
     objects.HealthBar.Filled = true
@@ -55,15 +78,18 @@ function ESP:Create(player)
     
     -- Tracer
     objects.Tracer = Drawing.new("Line")
+    objects.Tracer.Thickness = 1
     
     -- View Angle
     objects.ViewAngle = Drawing.new("Line")
+    objects.ViewAngle.Thickness = 2
     
     -- Off-screen arrow
     objects.Arrow = Drawing.new("Triangle")
+    objects.Arrow.Filled = true
 end
 
--- Update ESP settings
+-- Update ESP settings with constraints
 function ESP:UpdateSettings(newSettings)
     for setting, value in pairs(newSettings) do
         if self.Settings[setting] ~= nil then
@@ -83,94 +109,171 @@ function ESP:UpdateSettings(newSettings)
     end
 end
 
+-- Get team color based on settings
+function ESP:GetTeamColor(player)
+    if not self.Settings.TeamColor then 
+        return self.Settings.BoxColor -- Use custom color if team color is disabled
+    end
+    
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer then return self.Colors.Neutral end
+    
+    if player.Team == localPlayer.Team then
+        return self.Colors.Ally
+    else
+        return self.Colors.Enemy
+    end
+end
+
+-- Check if player should be visible
+function ESP:ShouldShow(player)
+    if not self.Settings.TeamCheck then return true end
+    return player.Team ~= Players.LocalPlayer.Team
+end
+
+-- Toggle ESP
+function ESP:Toggle(state)
+    self.Settings.Enabled = state
+    if not state then
+        -- Clear all ESP when disabling
+        for _, data in pairs(self.Players) do
+            if data.Object.Highlight then
+                data.Object.Highlight.Enabled = false
+            end
+            data.Object.Box.Visible = false
+            data.Object.HealthBar.Visible = false
+            data.Object.HealthBarOutline.Visible = false
+            data.Object.Text.Visible = false
+            data.Object.Tracer.Visible = false
+            data.Object.ViewAngle.Visible = false
+            data.Object.Arrow.Visible = false
+        end
+    end
+end
+
+-- Calculate proper bounding box
+function ESP:CalculateBoundingBox(character)
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local head = character:FindFirstChild("Head")
+    
+    if not rootPart or not head then return nil end
+    
+    -- Calculate character size dynamically
+    local rootPos = rootPart.Position
+    local headPos = head.Position
+    
+    -- Calculate height from root to head
+    local height = (headPos - rootPos).Magnitude * 2.2  -- Add extra space for legs
+    local width = height * 0.5  -- Proportional width
+    
+    -- Calculate corners
+    local top = rootPos + Vector3.new(0, height/2, 0)
+    local bottom = rootPos - Vector3.new(0, height/2, 0)
+    
+    local topScreenPos, topOnScreen = Camera:WorldToViewportPoint(top)
+    local bottomScreenPos, bottomOnScreen = Camera:WorldToViewportPoint(bottom)
+    
+    if not topOnScreen and not bottomOnScreen then return nil end
+    
+    -- Calculate screen positions
+    local topScreen = Vector2.new(topScreenPos.X, topScreenPos.Y)
+    local bottomScreen = Vector2.new(bottomScreenPos.X, bottomScreenPos.Y)
+    
+    local size = Vector2.new(
+        width * (Camera.ViewportSize.Y / (topScreenPos.Z * 10)), -- Scale by distance
+        (topScreen - bottomScreen).Magnitude
+    )
+    
+    local position = Vector2.new(
+        topScreen.X - size.X / 2,
+        topScreen.Y
+    )
+    
+    return position, size
+end
+
 -- Update ESP visuals
 function ESP:Update()
     if not self.Settings.Enabled then return end
     
     local cameraPos = Camera.CFrame.Position
+    local localPlayer = Players.LocalPlayer
     
     for player, data in pairs(self.Players) do
         local character = player.Character
         local objects = data.Object
         
-        if character and player ~= Players.LocalPlayer then
+        if character and player ~= localPlayer and self:ShouldShow(player) then
             local rootPart = character:FindFirstChild("HumanoidRootPart")
             local humanoid = character:FindFirstChild("Humanoid")
             
             if rootPart and humanoid then
                 local position, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
                 local distance = (rootPart.Position - cameraPos).Magnitude
+                local teamColor = self:GetTeamColor(player)
                 
                 if distance <= self.Settings.MaxDistance then
-                    -- Calculate bounding box dimensions
-                    local size = Vector3.new(4, 6, 0)
-                    local offset = CFrame.new(0, -size.Y/2, 0)
-                    local corners = {
-                        topRight = Camera:WorldToViewportPoint((rootPart.CFrame * offset * CFrame.new(size.X/2, size.Y/2, 0)).Position),
-                        topLeft = Camera:WorldToViewportPoint((rootPart.CFrame * offset * CFrame.new(-size.X/2, size.Y/2, 0)).Position),
-                        bottomRight = Camera:WorldToViewportPoint((rootPart.CFrame * offset * CFrame.new(size.X/2, -size.Y/2, 0)).Position),
-                        bottomLeft = Camera:WorldToViewportPoint((rootPart.CFrame * offset * CFrame.new(-size.X/2, -size.Y/2, 0)).Position)
-                    }
-                    
                     -- Chams
                     if self.Settings.Chams then
                         objects.Highlight.Adornee = character
                         objects.Highlight.Enabled = true
+                        objects.Highlight.FillColor = teamColor
                     else
                         objects.Highlight.Enabled = false
                     end
                     
                     if onScreen then
-                        -- Box
-                        if self.Settings.Box then
-                            objects.Box.Visible = true
-                            objects.Box.Size = Vector2.new(
-                                math.abs(corners.topRight.X - corners.topLeft.X),
-                                math.abs(corners.topRight.Y - corners.bottomRight.Y)
-                            )
-                            objects.Box.Position = Vector2.new(
-                                corners.topLeft.X,
-                                corners.topLeft.Y
-                            )
-                        else
-                            objects.Box.Visible = false
-                        end
+                        -- Calculate proper bounding box
+                        local boxPos, boxSize = self:CalculateBoundingBox(character)
                         
-                        -- Health Bar
-                        if self.Settings.HealthBar then
-                            local healthPercent = humanoid.Health / humanoid.MaxHealth
-                            local barHeight = objects.Box.Size.Y
-                            local barWidth = 4
+                        if boxPos and boxSize then
+                            -- Box
+                            if self.Settings.Box then
+                                objects.Box.Visible = true
+                                objects.Box.Size = boxSize
+                                objects.Box.Position = boxPos
+                                objects.Box.Color = teamColor
+                            else
+                                objects.Box.Visible = false
+                            end
                             
-                            -- Outline
-                            objects.HealthBarOutline.Visible = self.Settings.Outline
-                            objects.HealthBarOutline.Size = Vector2.new(barWidth, barHeight)
-                            objects.HealthBarOutline.Position = objects.Box.Position - Vector2.new(6, 0)
-                            objects.HealthBarOutline.Color = Color3.new(0, 0, 0)
+                            -- Health Bar
+                            if self.Settings.HealthBar then
+                                local healthPercent = humanoid.Health / humanoid.MaxHealth
+                                local barHeight = boxSize.Y
+                                local barWidth = 4
+                                
+                                -- Outline
+                                objects.HealthBarOutline.Visible = self.Settings.Outline
+                                objects.HealthBarOutline.Size = Vector2.new(barWidth, barHeight)
+                                objects.HealthBarOutline.Position = boxPos - Vector2.new(6, 0)
+                                objects.HealthBarOutline.Color = Color3.new(0, 0, 0)
+                                
+                                -- Fill
+                                objects.HealthBar.Visible = true
+                                objects.HealthBar.Size = Vector2.new(barWidth - 2, barHeight * healthPercent - 2)
+                                objects.HealthBar.Position = objects.HealthBarOutline.Position + 
+                                    Vector2.new(1, 1 + barHeight * (1 - healthPercent))
+                                objects.HealthBar.Color = Color3.new(1 - healthPercent, healthPercent, 0)
+                            else
+                                objects.HealthBar.Visible = false
+                                objects.HealthBarOutline.Visible = false
+                            end
                             
-                            -- Fill
-                            objects.HealthBar.Visible = true
-                            objects.HealthBar.Size = Vector2.new(barWidth - 2, barHeight * healthPercent - 2)
-                            objects.HealthBar.Position = objects.HealthBarOutline.Position + 
-                                Vector2.new(1, 1 + barHeight * (1 - healthPercent))
-                            objects.HealthBar.Color = Color3.new(1 - healthPercent, healthPercent, 0)
-                        else
-                            objects.HealthBar.Visible = false
-                            objects.HealthBarOutline.Visible = false
-                        end
-                        
-                        -- Text
-                        if self.Settings.Text then
-                            objects.Text.Visible = true
-                            objects.Text.Text = string.format("%s [%dm]", player.Name, math.floor(distance))
-                            objects.Text.Position = Vector2.new(
-                                objects.Box.Position.X + objects.Box.Size.X / 2,
-                                objects.Box.Position.Y - 20
-                            )
-                            objects.Text.Size = self.Settings.TextSize
-                            objects.Text.Font = self.Fonts[self.Settings.TextFont]
-                        else
-                            objects.Text.Visible = false
+                            -- Text
+                            if self.Settings.Text then
+                                objects.Text.Visible = true
+                                objects.Text.Text = string.format("%s [%dm]", player.Name, math.floor(distance))
+                                objects.Text.Position = Vector2.new(
+                                    boxPos.X + boxSize.X / 2,
+                                    boxPos.Y - 20
+                                )
+                                objects.Text.Size = self.Settings.TextSize
+                                objects.Text.Font = self.Fonts[self.Settings.TextFont]
+                                objects.Text.Color = self.Settings.TextColor
+                            else
+                                objects.Text.Visible = false
+                            end
                         end
                         
                         -- Tracer
@@ -178,6 +281,7 @@ function ESP:Update()
                             objects.Tracer.Visible = true
                             objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
                             objects.Tracer.To = Vector2.new(position.X, position.Y)
+                            objects.Tracer.Color = self.Settings.TracerColor
                         else
                             objects.Tracer.Visible = false
                         end
@@ -189,6 +293,7 @@ function ESP:Update()
                             local lookEnd = Camera:WorldToViewportPoint(rootPart.Position + lookDir)
                             objects.ViewAngle.From = Vector2.new(position.X, position.Y)
                             objects.ViewAngle.To = Vector2.new(lookEnd.X, lookEnd.Y)
+                            objects.ViewAngle.Color = self.Settings.ViewAngleColor
                         else
                             objects.ViewAngle.Visible = false
                         end
@@ -221,6 +326,7 @@ function ESP:Update()
                             objects.Arrow.PointA = points[1]
                             objects.Arrow.PointB = points[2]
                             objects.Arrow.PointC = points[3]
+                            objects.Arrow.Color = self.Settings.ArrowColor
                         else
                             objects.Arrow.Visible = false
                         end
@@ -297,6 +403,8 @@ function ESP:Init()
     RunService.Heartbeat:Connect(function()
         self:Update()
     end)
+    
+    return self
 end
 
 return ESP
