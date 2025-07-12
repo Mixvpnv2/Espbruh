@@ -1,10 +1,10 @@
--- Fixed ESP Library
+-- Enhanced ESP Library with Head View Angles and Box Size Control
 local ESP = {Players = {}}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Camera = workspace.CurrentCamera
 
--- Default settings
+-- Default settings with constraints
 ESP.Settings = {
     Enabled = true,
     Chams = false,
@@ -13,15 +13,15 @@ ESP.Settings = {
     Text = true,
     Tracer = false,
     ViewAngle = false,
-    HeadViewAngle = true,
+    HeadViewAngle = true,  -- New: Head view angle
     OffScreenArrow = false,
-    Outline = false,
+    Outline = true,
     BoldText = false,
     MaxDistance = 5000,
     ArrowRadius = 30,
     ArrowSize = 2,
     TextSize = 12,
-    TextFont = "Roboto",
+    TextFont = 1,
     TeamCheck = false,
     TeamColor = true,
     BoxColor = Color3.new(1, 0, 0),
@@ -29,30 +29,28 @@ ESP.Settings = {
     TextColor = Color3.new(1, 1, 1),
     TracerColor = Color3.new(1, 1, 0),
     ViewAngleColor = Color3.new(0, 0.6, 1),
-    HeadViewAngleColor = Color3.new(1, 0.5, 0),
+    HeadViewAngleColor = Color3.new(1, 0.5, 0),  -- New: Head view angle color
     ArrowColor = Color3.new(1, 0, 0),
     HealthBarColor = Color3.new(0, 1, 0),
-    BoxHeight = 6,
-    BoxWidth = 4,
-    BoxScale = 1.0
+    BoxHeight = 6,  -- Default box height in studs
+    BoxWidth = 4,   -- Default box width in studs
+    BoxScale = 1.0  -- Box size multiplier
 }
 
--- Comprehensive font mapping
-ESP.FontMap = {
-    Roboto = Enum.Font.Roboto,
-    Arial = Enum.Font.SourceSans,  -- Arial not available, using closest match
-    ["Source Sans"] = Enum.Font.SourceSans,
-    ["Source Sans Pro"] = Enum.Font.SourceSans,
-    Code = Enum.Font.Code,
-    Gotham = Enum.Font.Gotham,
-    SciFi = Enum.Font.SciFi,
-    Arcade = Enum.Font.Arcade,
-    Fantasy = Enum.Font.Fantasy,
-    Legacy = Enum.Font.Legacy,
-    Bodoni = Enum.Font.SourceSans,  -- Fallbacks
-    Helvetica = Enum.Font.SourceSans,
-    Courier = Enum.Font.Code,
-    Verdana = Enum.Font.SourceSans
+-- Font mapping
+ESP.Fonts = {
+    [1] = Enum.Font.Roboto,
+    [2] = Enum.Font.Legacy,
+    [3] = Enum.Font.SourceSans,
+    [4] = Enum.Font.Code,
+    [5] = Enum.Font.Gotham
+}
+
+-- Color presets for team (if team color is enabled)
+ESP.Colors = {
+    Ally = Color3.fromRGB(0, 255, 0),
+    Enemy = Color3.fromRGB(255, 0, 0),
+    Neutral = Color3.fromRGB(255, 255, 0)
 }
 
 -- Create ESP objects for a player
@@ -60,7 +58,7 @@ function ESP:Create(player)
     if self.Players[player] then return end
     
     local objects = {}
-    self.Players[player] = {Object = objects, Player = player, Connections = {}}
+    self.Players[player] = {Object = objects, Player = player}
     
     -- Chams Highlight
     objects.Highlight = Instance.new("Highlight")
@@ -68,115 +66,39 @@ function ESP:Create(player)
     objects.Highlight.OutlineTransparency = 1
     objects.Highlight.FillTransparency = 0.5
     objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    objects.Highlight.Adornee = nil
-    objects.Highlight.Parent = game:GetService("CoreGui")  -- Parent to CoreGui for safety
     
-    -- Setup character connection
-    local function setupCharacter(character)
-        -- Clean up previous connections
-        for _, conn in ipairs(objects.Connections) do
-            conn:Disconnect()
-        end
-        objects.Connections = {}
-        
-        -- Connect to humanoid death
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            table.insert(objects.Connections, humanoid.Died:Connect(function()
-                self:RemovePlayer(player)
-            end))
-            
-            table.insert(objects.Connections, humanoid:GetPropertyChangedSignal("Health"):Connect(function()
-                if humanoid.Health <= 0 then
-                    self:RemovePlayer(player)
-                end
-            end))
-        end
-        
-        -- Connect to character removal
-        table.insert(objects.Connections, character.AncestryChanged:Connect(function(_, parent)
-            if not parent then
-                self:RemovePlayer(player)
-            end
-        end))
-        
-        -- Connect to character destruction
-        table.insert(objects.Connections, character.Destroying:Connect(function()
-            self:RemovePlayer(player)
-        end))
-    end
-    
-    -- Connect to character changes
-    if player.Character then
-        setupCharacter(player.Character)
-    end
-    
-    local charAddedConn
-    charAddedConn = player.CharacterAdded:Connect(function(character)
-        setupCharacter(character)
-    end)
-    table.insert(objects.Connections, charAddedConn)
-    
-    -- Drawing objects
+    -- Box
     objects.Box = Drawing.new("Square")
-    objects.HealthBarOutline = Drawing.new("Square")
-    objects.HealthBar = Drawing.new("Square")
-    objects.Text = Drawing.new("Text")
-    objects.Tracer = Drawing.new("Line")
-    objects.ViewAngle = Drawing.new("Line")
-    objects.HeadViewAngle = Drawing.new("Line")
-    objects.Arrow = Drawing.new("Triangle")
-    
-    -- Initial setup
     objects.Box.Thickness = 1
     objects.Box.Filled = false
+    
+    -- Health Bar
+    objects.HealthBarOutline = Drawing.new("Square")
+    objects.HealthBar = Drawing.new("Square")
     objects.HealthBar.Filled = true
+    
+    -- Text
+    objects.Text = Drawing.new("Text")
     objects.Text.Center = true
-    objects.Arrow.Filled = true
-    objects.ViewAngle.Thickness = 2
-    objects.HeadViewAngle.Thickness = 2
+    
+    -- Tracer
+    objects.Tracer = Drawing.new("Line")
     objects.Tracer.Thickness = 1
     
-    -- Set initial visibility to false
-    objects.Box.Visible = false
-    objects.HealthBar.Visible = false
-    objects.HealthBarOutline.Visible = false
-    objects.Text.Visible = false
-    objects.Tracer.Visible = false
-    objects.ViewAngle.Visible = false
-    objects.HeadViewAngle.Visible = false
-    objects.Arrow.Visible = false
+    -- View Angle (from torso)
+    objects.ViewAngle = Drawing.new("Line")
+    objects.ViewAngle.Thickness = 2
+    
+    -- Head View Angle (new)
+    objects.HeadViewAngle = Drawing.new("Line")
+    objects.HeadViewAngle.Thickness = 2
+    
+    -- Off-screen arrow
+    objects.Arrow = Drawing.new("Triangle")
+    objects.Arrow.Filled = true
 end
 
--- Remove player ESP
-function ESP:RemovePlayer(player)
-    local data = self.Players[player]
-    if not data then return end
-    
-    -- Disconnect connections
-    for _, conn in ipairs(data.Connections) do
-        conn:Disconnect()
-    end
-    
-    -- Destroy Highlight
-    if data.Object.Highlight then
-        data.Object.Highlight:Destroy()
-    end
-    
-    -- Remove drawing objects
-    data.Object.Box:Remove()
-    data.Object.HealthBar:Remove()
-    data.Object.HealthBarOutline:Remove()
-    data.Object.Text:Remove()
-    data.Object.Tracer:Remove()
-    data.Object.ViewAngle:Remove()
-    data.Object.HeadViewAngle:Remove()
-    data.Object.Arrow:Remove()
-    
-    self.Players[player] = nil
-end
-
--- Update ESP settings
+-- Update ESP settings with constraints
 function ESP:UpdateSettings(newSettings)
     for setting, value in pairs(newSettings) do
         if self.Settings[setting] ~= nil then
@@ -187,6 +109,8 @@ function ESP:UpdateSettings(newSettings)
                 self.Settings[setting] = math.clamp(value, 1, 5)
             elseif setting == "TextSize" then
                 self.Settings[setting] = math.clamp(value, 1, 24)
+            elseif setting == "TextFont" then
+                self.Settings[setting] = math.clamp(value, 1, 5)
             elseif setting == "BoxHeight" then
                 self.Settings[setting] = math.clamp(value, 1, 20)
             elseif setting == "BoxWidth" then
@@ -200,24 +124,19 @@ function ESP:UpdateSettings(newSettings)
     end
 end
 
--- Get font from setting
-function ESP:GetFont()
-    return self.FontMap[self.Settings.TextFont] or Enum.Font.Roboto
-end
-
--- Get team color
+-- Get team color based on settings
 function ESP:GetTeamColor(player)
     if not self.Settings.TeamColor then 
-        return self.Settings.BoxColor
+        return self.Settings.BoxColor -- Use custom color if team color is disabled
     end
     
     local localPlayer = Players.LocalPlayer
-    if not localPlayer then return self.Settings.BoxColor end
+    if not localPlayer then return self.Colors.Neutral end
     
     if player.Team == localPlayer.Team then
-        return Color3.new(0, 1, 0)  -- Ally green
+        return self.Colors.Ally
     else
-        return Color3.new(1, 0, 0)  -- Enemy red
+        return self.Colors.Enemy
     end
 end
 
@@ -232,7 +151,7 @@ function ESP:Toggle(state)
     self.Settings.Enabled = state
     if not state then
         -- Clear all ESP when disabling
-        for player, data in pairs(self.Players) do
+        for _, data in pairs(self.Players) do
             if data.Object.Highlight then
                 data.Object.Highlight.Enabled = false
             end
@@ -248,7 +167,7 @@ function ESP:Toggle(state)
     end
 end
 
--- Calculate bounding box
+-- Calculate proper bounding box with configurable size
 function ESP:CalculateBoundingBox(character)
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     local head = character:FindFirstChild("Head")
@@ -301,23 +220,12 @@ function ESP:Update()
         local character = player.Character
         local objects = data.Object
         
-        -- Skip if player is invalid or dead
-        if not character or not character.Parent then
-            self:RemovePlayer(player)
-            goto continue
-        end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then
-            self:RemovePlayer(player)
-            goto continue
-        end
-        
-        if player ~= localPlayer and self:ShouldShow(player) then
+        if character and player ~= localPlayer and self:ShouldShow(player) then
             local rootPart = character:FindFirstChild("HumanoidRootPart")
             local head = character:FindFirstChild("Head")
+            local humanoid = character:FindFirstChild("Humanoid")
             
-            if rootPart and head then
+            if rootPart and humanoid and head then
                 local rootPos, rootOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
                 local headPos, headOnScreen = Camera:WorldToViewportPoint(head.Position)
                 local distance = (rootPart.Position - cameraPos).Magnitude
@@ -329,7 +237,6 @@ function ESP:Update()
                         objects.Highlight.Adornee = character
                         objects.Highlight.Enabled = true
                         objects.Highlight.FillColor = teamColor
-                        objects.Highlight.OutlineColor = Color3.new(0, 0, 0)
                     else
                         objects.Highlight.Enabled = false
                     end
@@ -384,7 +291,7 @@ function ESP:Update()
                                     boxPos.Y - 20
                                 )
                                 objects.Text.Size = self.Settings.TextSize
-                                objects.Text.Font = self:GetFont()
+                                objects.Text.Font = self.Fonts[self.Settings.TextFont]
                                 objects.Text.Color = self.Settings.TextColor
                             else
                                 objects.Text.Visible = false
@@ -406,25 +313,21 @@ function ESP:Update()
                             objects.ViewAngle.Visible = true
                             local lookDir = rootPart.CFrame.LookVector * 5
                             local lookEnd = Camera:WorldToViewportPoint(rootPart.Position + lookDir)
-                            if lookEnd then
-                                objects.ViewAngle.From = Vector2.new(rootPos.X, rootPos.Y)
-                                objects.ViewAngle.To = Vector2.new(lookEnd.X, lookEnd.Y)
-                                objects.ViewAngle.Color = self.Settings.ViewAngleColor
-                            end
+                            objects.ViewAngle.From = Vector2.new(rootPos.X, rootPos.Y)
+                            objects.ViewAngle.To = Vector2.new(lookEnd.X, lookEnd.Y)
+                            objects.ViewAngle.Color = self.Settings.ViewAngleColor
                         else
                             objects.ViewAngle.Visible = false
                         end
                         
-                        -- Head View Angle
+                        -- Head View Angle (new)
                         if self.Settings.HeadViewAngle then
                             objects.HeadViewAngle.Visible = true
                             local headLookDir = head.CFrame.LookVector * 3
                             local headLookEnd = Camera:WorldToViewportPoint(head.Position + headLookDir)
-                            if headLookEnd then
-                                objects.HeadViewAngle.From = Vector2.new(headPos.X, headPos.Y)
-                                objects.HeadViewAngle.To = Vector2.new(headLookEnd.X, headLookEnd.Y)
-                                objects.HeadViewAngle.Color = self.Settings.HeadViewAngleColor
-                            end
+                            objects.HeadViewAngle.From = Vector2.new(headPos.X, headPos.Y)
+                            objects.HeadViewAngle.To = Vector2.new(headLookEnd.X, headLookEnd.Y)
+                            objects.HeadViewAngle.Color = self.Settings.HeadViewAngleColor
                         else
                             objects.HeadViewAngle.Visible = false
                         end
@@ -483,21 +386,12 @@ function ESP:Update()
                     objects.HeadViewAngle.Visible = false
                     objects.Arrow.Visible = false
                 end
-            else
-                -- Missing parts - hide all
-                objects.Highlight.Enabled = false
-                objects.Box.Visible = false
-                objects.HealthBar.Visible = false
-                objects.HealthBarOutline.Visible = false
-                objects.Text.Visible = false
-                objects.Tracer.Visible = false
-                objects.ViewAngle.Visible = false
-                objects.HeadViewAngle.Visible = false
-                objects.Arrow.Visible = false
             end
         else
             -- Player not valid - hide all
-            objects.Highlight.Enabled = false
+            if objects.Highlight then
+                objects.Highlight.Enabled = false
+            end
             objects.Box.Visible = false
             objects.HealthBar.Visible = false
             objects.HealthBarOutline.Visible = false
@@ -507,8 +401,6 @@ function ESP:Update()
             objects.HeadViewAngle.Visible = false
             objects.Arrow.Visible = false
         end
-        
-        ::continue::
     end
 end
 
@@ -523,14 +415,26 @@ function ESP:Init()
     
     -- Set up new players
     Players.PlayerAdded:Connect(function(player)
-        if player ~= Players.LocalPlayer then
-            self:Create(player)
-        end
+        self:Create(player)
     end)
     
     -- Clean up leaving players
     Players.PlayerRemoving:Connect(function(player)
-        self:RemovePlayer(player)
+        local data = self.Players[player]
+        if data then
+            if data.Object.Highlight then
+                data.Object.Highlight:Destroy()
+            end
+            data.Object.Box:Remove()
+            data.Object.HealthBar:Remove()
+            data.Object.HealthBarOutline:Remove()
+            data.Object.Text:Remove()
+            data.Object.Tracer:Remove()
+            data.Object.ViewAngle:Remove()
+            data.Object.HeadViewAngle:Remove()
+            data.Object.Arrow:Remove()
+            self.Players[player] = nil
+        end
     end)
     
     -- Start update loop
