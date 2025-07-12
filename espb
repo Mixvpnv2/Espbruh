@@ -1,4 +1,4 @@
--- ESP Library for Roblox
+-- Enhanced ESP Library with Head View Angles and Box Size Control
 local ESP = {Players = {}}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -7,13 +7,14 @@ local Camera = workspace.CurrentCamera
 -- Default settings with constraints
 ESP.Settings = {
     Enabled = true,
-    Chams = false,
+    Chams = true,
     Box = true,
     HealthBar = true,
     Text = true,
-    Tracer = false,
-    ViewAngle = false,
-    OffScreenArrow = false,
+    Tracer = true,
+    ViewAngle = true,
+    HeadViewAngle = true,  -- New: Head view angle
+    OffScreenArrow = true,
     Outline = true,
     BoldText = false,
     MaxDistance = 5000,
@@ -28,8 +29,12 @@ ESP.Settings = {
     TextColor = Color3.new(1, 1, 1),
     TracerColor = Color3.new(1, 1, 0),
     ViewAngleColor = Color3.new(0, 0.6, 1),
+    HeadViewAngleColor = Color3.new(1, 0.5, 0),  -- New: Head view angle color
     ArrowColor = Color3.new(1, 0, 0),
-    HealthBarColor = Color3.new(0, 1, 0)
+    HealthBarColor = Color3.new(0, 1, 0),
+    BoxHeight = 6,  -- Default box height in studs
+    BoxWidth = 4,   -- Default box width in studs
+    BoxScale = 1.0  -- Box size multiplier
 }
 
 -- Font mapping
@@ -80,9 +85,13 @@ function ESP:Create(player)
     objects.Tracer = Drawing.new("Line")
     objects.Tracer.Thickness = 1
     
-    -- View Angle
+    -- View Angle (from torso)
     objects.ViewAngle = Drawing.new("Line")
     objects.ViewAngle.Thickness = 2
+    
+    -- Head View Angle (new)
+    objects.HeadViewAngle = Drawing.new("Line")
+    objects.HeadViewAngle.Thickness = 2
     
     -- Off-screen arrow
     objects.Arrow = Drawing.new("Triangle")
@@ -102,6 +111,12 @@ function ESP:UpdateSettings(newSettings)
                 self.Settings[setting] = math.clamp(value, 1, 24)
             elseif setting == "TextFont" then
                 self.Settings[setting] = math.clamp(value, 1, 5)
+            elseif setting == "BoxHeight" then
+                self.Settings[setting] = math.clamp(value, 1, 20)
+            elseif setting == "BoxWidth" then
+                self.Settings[setting] = math.clamp(value, 1, 20)
+            elseif setting == "BoxScale" then
+                self.Settings[setting] = math.clamp(value, 0.1, 3)
             else
                 self.Settings[setting] = value
             end
@@ -146,30 +161,28 @@ function ESP:Toggle(state)
             data.Object.Text.Visible = false
             data.Object.Tracer.Visible = false
             data.Object.ViewAngle.Visible = false
+            data.Object.HeadViewAngle.Visible = false
             data.Object.Arrow.Visible = false
         end
     end
 end
 
--- Calculate proper bounding box
+-- Calculate proper bounding box with configurable size
 function ESP:CalculateBoundingBox(character)
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     local head = character:FindFirstChild("Head")
     
     if not rootPart or not head then return nil end
     
-    -- Calculate character size dynamically
-    local rootPos = rootPart.Position
-    local headPos = head.Position
+    -- Use configurable box dimensions
+    local height = self.Settings.BoxHeight * self.Settings.BoxScale
+    local width = self.Settings.BoxWidth * self.Settings.BoxScale
     
-    -- Calculate height from root to head
-    local height = (headPos - rootPos).Magnitude * 2.2  -- Add extra space for legs
-    local width = height * 0.5  -- Proportional width
+    -- Calculate positions for box corners
+    local top = rootPart.Position + Vector3.new(0, height/2, 0)
+    local bottom = rootPart.Position - Vector3.new(0, height/2, 0)
     
-    -- Calculate corners
-    local top = rootPos + Vector3.new(0, height/2, 0)
-    local bottom = rootPos - Vector3.new(0, height/2, 0)
-    
+    -- Convert to screen space
     local topScreenPos, topOnScreen = Camera:WorldToViewportPoint(top)
     local bottomScreenPos, bottomOnScreen = Camera:WorldToViewportPoint(bottom)
     
@@ -179,8 +192,12 @@ function ESP:CalculateBoundingBox(character)
     local topScreen = Vector2.new(topScreenPos.X, topScreenPos.Y)
     local bottomScreen = Vector2.new(bottomScreenPos.X, bottomScreenPos.Y)
     
+    -- Calculate box size based on distance
+    local distanceFactor = 1 / (topScreenPos.Z + 0.0001) -- Avoid division by zero
+    local scaledWidth = width * distanceFactor * 100
+    
     local size = Vector2.new(
-        width * (Camera.ViewportSize.Y / (topScreenPos.Z * 10)), -- Scale by distance
+        scaledWidth,
         (topScreen - bottomScreen).Magnitude
     )
     
@@ -205,10 +222,12 @@ function ESP:Update()
         
         if character and player ~= localPlayer and self:ShouldShow(player) then
             local rootPart = character:FindFirstChild("HumanoidRootPart")
+            local head = character:FindFirstChild("Head")
             local humanoid = character:FindFirstChild("Humanoid")
             
-            if rootPart and humanoid then
-                local position, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+            if rootPart and humanoid and head then
+                local rootPos, rootOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
+                local headPos, headOnScreen = Camera:WorldToViewportPoint(head.Position)
                 local distance = (rootPart.Position - cameraPos).Magnitude
                 local teamColor = self:GetTeamColor(player)
                 
@@ -222,7 +241,7 @@ function ESP:Update()
                         objects.Highlight.Enabled = false
                     end
                     
-                    if onScreen then
+                    if rootOnScreen then
                         -- Calculate proper bounding box
                         local boxPos, boxSize = self:CalculateBoundingBox(character)
                         
@@ -254,7 +273,10 @@ function ESP:Update()
                                 objects.HealthBar.Size = Vector2.new(barWidth - 2, barHeight * healthPercent - 2)
                                 objects.HealthBar.Position = objects.HealthBarOutline.Position + 
                                     Vector2.new(1, 1 + barHeight * (1 - healthPercent))
-                                objects.HealthBar.Color = Color3.new(1 - healthPercent, healthPercent, 0)
+                                objects.HealthBar.Color = self.Settings.HealthBarColor:Lerp(
+                                    Color3.new(1, 0, 0), 
+                                    1 - healthPercent
+                                )
                             else
                                 objects.HealthBar.Visible = false
                                 objects.HealthBarOutline.Visible = false
@@ -280,22 +302,34 @@ function ESP:Update()
                         if self.Settings.Tracer then
                             objects.Tracer.Visible = true
                             objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                            objects.Tracer.To = Vector2.new(position.X, position.Y)
+                            objects.Tracer.To = Vector2.new(rootPos.X, rootPos.Y)
                             objects.Tracer.Color = self.Settings.TracerColor
                         else
                             objects.Tracer.Visible = false
                         end
                         
-                        -- View Angle
+                        -- View Angle (from torso)
                         if self.Settings.ViewAngle then
                             objects.ViewAngle.Visible = true
                             local lookDir = rootPart.CFrame.LookVector * 5
                             local lookEnd = Camera:WorldToViewportPoint(rootPart.Position + lookDir)
-                            objects.ViewAngle.From = Vector2.new(position.X, position.Y)
+                            objects.ViewAngle.From = Vector2.new(rootPos.X, rootPos.Y)
                             objects.ViewAngle.To = Vector2.new(lookEnd.X, lookEnd.Y)
                             objects.ViewAngle.Color = self.Settings.ViewAngleColor
                         else
                             objects.ViewAngle.Visible = false
+                        end
+                        
+                        -- Head View Angle (new)
+                        if self.Settings.HeadViewAngle then
+                            objects.HeadViewAngle.Visible = true
+                            local headLookDir = head.CFrame.LookVector * 3
+                            local headLookEnd = Camera:WorldToViewportPoint(head.Position + headLookDir)
+                            objects.HeadViewAngle.From = Vector2.new(headPos.X, headPos.Y)
+                            objects.HeadViewAngle.To = Vector2.new(headLookEnd.X, headLookEnd.Y)
+                            objects.HeadViewAngle.Color = self.Settings.HeadViewAngleColor
+                        else
+                            objects.HeadViewAngle.Visible = false
                         end
                         
                         -- Hide off-screen elements
@@ -338,6 +372,7 @@ function ESP:Update()
                         objects.Text.Visible = false
                         objects.Tracer.Visible = false
                         objects.ViewAngle.Visible = false
+                        objects.HeadViewAngle.Visible = false
                     end
                 else
                     -- Out of range - hide all
@@ -348,6 +383,7 @@ function ESP:Update()
                     objects.Text.Visible = false
                     objects.Tracer.Visible = false
                     objects.ViewAngle.Visible = false
+                    objects.HeadViewAngle.Visible = false
                     objects.Arrow.Visible = false
                 end
             end
@@ -362,6 +398,7 @@ function ESP:Update()
             objects.Text.Visible = false
             objects.Tracer.Visible = false
             objects.ViewAngle.Visible = false
+            objects.HeadViewAngle.Visible = false
             objects.Arrow.Visible = false
         end
     end
@@ -394,6 +431,7 @@ function ESP:Init()
             data.Object.Text:Remove()
             data.Object.Tracer:Remove()
             data.Object.ViewAngle:Remove()
+            data.Object.HeadViewAngle:Remove()
             data.Object.Arrow:Remove()
             self.Players[player] = nil
         end
