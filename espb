@@ -7,15 +7,15 @@ local Camera = workspace.CurrentCamera
 -- Default settings with constraints
 ESP.Settings = {
     Enabled = true,
-    Chams = true,
+    Chams = false,
     Box = true,
     HealthBar = true,
     Text = true,
-    Tracer = true,
-    ViewAngle = true,
+    Tracer = false,
+    ViewAngle = false,
     HeadViewAngle = true,  -- New: Head view angle
-    OffScreenArrow = true,
-    Outline = true,
+    OffScreenArrow = false,
+    Outline = false,
     BoldText = false,
     MaxDistance = 5000,
     ArrowRadius = 30,
@@ -33,7 +33,7 @@ ESP.Settings = {
     ArrowColor = Color3.new(1, 0, 0),
     HealthBarColor = Color3.new(0, 1, 0),
     BoxHeight = 6,  -- Default box height in studs
-    BoxWidth = 4,   -- Default box width in studs
+    BoxWidth = 20,   -- Default box width in studs
     BoxScale = 1.0  -- Box size multiplier
 }
 
