@@ -1,19 +1,19 @@
--- Enhanced ESP Library with Head View Angles and Box Size Control
+-- Fixed ESP Library with Nil Value Protection
 local ESP = {Players = {}}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Camera = workspace.CurrentCamera
 
--- Default settings with constraints
+-- Default settings
 ESP.Settings = {
     Enabled = true,
     Chams = false,
     Box = true,
     HealthBar = true,
     Text = true,
-    Tracer = false,
+    Tracer = true,
     ViewAngle = false,
-    HeadViewAngle = true,  -- New: Head view angle
+    HeadViewAngle = true,
     OffScreenArrow = false,
     Outline = true,
     BoldText = false,
@@ -21,7 +21,7 @@ ESP.Settings = {
     ArrowRadius = 30,
     ArrowSize = 2,
     TextSize = 12,
-    TextFont = 1,
+    TextFont = "Roboto",
     TeamCheck = false,
     TeamColor = true,
     BoxColor = Color3.new(1, 0, 0),
@@ -29,36 +29,44 @@ ESP.Settings = {
     TextColor = Color3.new(1, 1, 1),
     TracerColor = Color3.new(1, 1, 0),
     ViewAngleColor = Color3.new(0, 0.6, 1),
-    HeadViewAngleColor = Color3.new(1, 0.5, 0),  -- New: Head view angle color
+    HeadViewAngleColor = Color3.new(1, 0.5, 0),
     ArrowColor = Color3.new(1, 0, 0),
     HealthBarColor = Color3.new(0, 1, 0),
-    BoxHeight = 6,  -- Default box height in studs
-    BoxWidth = 4,   -- Default box width in studs
-    BoxScale = 1.0  -- Box size multiplier
+    BoxHeight = 6,
+    BoxWidth = 20,
+    BoxScale = 1.0
 }
 
--- Font mapping
-ESP.Fonts = {
-    [1] = Enum.Font.Roboto,
-    [2] = Enum.Font.Legacy,
-    [3] = Enum.Font.SourceSans,
-    [4] = Enum.Font.Code,
-    [5] = Enum.Font.Gotham
+-- Comprehensive font mapping
+ESP.FontMap = {
+    Roboto = Enum.Font.Roboto,
+    Arial = Enum.Font.SourceSans,
+    ["Source Sans"] = Enum.Font.SourceSans,
+    ["Source Sans Pro"] = Enum.Font.SourceSans,
+    Code = Enum.Font.Code,
+    Gotham = Enum.Font.Gotham,
+    SciFi = Enum.Font.SciFi,
+    Arcade = Enum.Font.Arcade,
+    Fantasy = Enum.Font.Fantasy,
+    Legacy = Enum.Font.Legacy,
+    Bodoni = Enum.Font.SourceSans,
+    Helvetica = Enum.Font.SourceSans,
+    Courier = Enum.Font.Code,
+    Verdana = Enum.Font.SourceSans
 }
 
--- Color presets for team (if team color is enabled)
-ESP.Colors = {
-    Ally = Color3.fromRGB(0, 255, 0),
-    Enemy = Color3.fromRGB(255, 0, 0),
-    Neutral = Color3.fromRGB(255, 255, 0)
-}
+-- Safe object creation function
+local function safeCreateDrawing(type)
+    local success, obj = pcall(Drawing.new, type)
+    return success and obj or nil
+end
 
 -- Create ESP objects for a player
 function ESP:Create(player)
     if self.Players[player] then return end
     
     local objects = {}
-    self.Players[player] = {Object = objects, Player = player}
+    self.Players[player] = {Object = objects, Player = player, Connections = {}}
     
     -- Chams Highlight
     objects.Highlight = Instance.new("Highlight")
@@ -66,39 +74,132 @@ function ESP:Create(player)
     objects.Highlight.OutlineTransparency = 1
     objects.Highlight.FillTransparency = 0.5
     objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    objects.Highlight.Adornee = nil
+    objects.Highlight.Parent = game:GetService("CoreGui")
     
-    -- Box
-    objects.Box = Drawing.new("Square")
-    objects.Box.Thickness = 1
-    objects.Box.Filled = false
+    -- Setup character connection
+    local function setupCharacter(character)
+        -- Clean up previous connections
+        for _, conn in ipairs(objects.Connections) do
+            conn:Disconnect()
+        end
+        objects.Connections = {}
+        
+        -- Connect to humanoid death
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            table.insert(objects.Connections, humanoid.Died:Connect(function()
+                self:RemovePlayer(player)
+            end))
+            
+            table.insert(objects.Connections, humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+                if humanoid.Health <= 0 then
+                    self:RemovePlayer(player)
+                end
+            end))
+        end
+        
+        -- Connect to character removal
+        table.insert(objects.Connections, character.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                self:RemovePlayer(player)
+            end
+        end))
+        
+        -- Connect to character destruction
+        table.insert(objects.Connections, character.Destroying:Connect(function()
+            self:RemovePlayer(player)
+        end))
+    end
     
-    -- Health Bar
-    objects.HealthBarOutline = Drawing.new("Square")
-    objects.HealthBar = Drawing.new("Square")
-    objects.HealthBar.Filled = true
+    -- Connect to character changes
+    if player.Character then
+        setupCharacter(player.Character)
+    end
     
-    -- Text
-    objects.Text = Drawing.new("Text")
-    objects.Text.Center = true
+    local charAddedConn
+    charAddedConn = player.CharacterAdded:Connect(function(character)
+        setupCharacter(character)
+    end)
+    table.insert(objects.Connections, charAddedConn)
     
-    -- Tracer
-    objects.Tracer = Drawing.new("Line")
-    objects.Tracer.Thickness = 1
+    -- Create drawing objects with nil protection
+    objects.Box = safeCreateDrawing("Square")
+    objects.HealthBarOutline = safeCreateDrawing("Square")
+    objects.HealthBar = safeCreateDrawing("Square")
+    objects.Text = safeCreateDrawing("Text")
+    objects.Tracer = safeCreateDrawing("Line")
+    objects.ViewAngle = safeCreateDrawing("Line")
+    objects.HeadViewAngle = safeCreateDrawing("Line")
+    objects.Arrow = safeCreateDrawing("Triangle")
     
-    -- View Angle (from torso)
-    objects.ViewAngle = Drawing.new("Line")
-    objects.ViewAngle.Thickness = 2
+    -- Initialize drawing objects if they exist
+    if objects.Box then
+        objects.Box.Thickness = 1
+        objects.Box.Filled = false
+        objects.Box.Visible = false
+    end
     
-    -- Head View Angle (new)
-    objects.HeadViewAngle = Drawing.new("Line")
-    objects.HeadViewAngle.Thickness = 2
+    if objects.HealthBar then
+        objects.HealthBar.Filled = true
+        objects.HealthBar.Visible = false
+    end
     
-    -- Off-screen arrow
-    objects.Arrow = Drawing.new("Triangle")
-    objects.Arrow.Filled = true
+    if objects.Text then
+        objects.Text.Center = true
+        objects.Text.Visible = false
+    end
+    
+    if objects.Arrow then
+        objects.Arrow.Filled = true
+        objects.Arrow.Visible = false
+    end
+    
+    if objects.ViewAngle then
+        objects.ViewAngle.Thickness = 2
+        objects.ViewAngle.Visible = false
+    end
+    
+    if objects.HeadViewAngle then
+        objects.HeadViewAngle.Thickness = 2
+        objects.HeadViewAngle.Visible = false
+    end
+    
+    if objects.Tracer then
+        objects.Tracer.Thickness = 1
+        objects.Tracer.Visible = false
+    end
 end
 
--- Update ESP settings with constraints
+-- Remove player ESP
+function ESP:RemovePlayer(player)
+    local data = self.Players[player]
+    if not data then return end
+    
+    -- Disconnect connections
+    for _, conn in ipairs(data.Connections) do
+        conn:Disconnect()
+    end
+    
+    -- Destroy Highlight
+    if data.Object.Highlight then
+        data.Object.Highlight:Destroy()
+    end
+    
+    -- Remove drawing objects
+    if data.Object.Box then data.Object.Box:Remove() end
+    if data.Object.HealthBar then data.Object.HealthBar:Remove() end
+    if data.Object.HealthBarOutline then data.Object.HealthBarOutline:Remove() end
+    if data.Object.Text then data.Object.Text:Remove() end
+    if data.Object.Tracer then data.Object.Tracer:Remove() end
+    if data.Object.ViewAngle then data.Object.ViewAngle:Remove() end
+    if data.Object.HeadViewAngle then data.Object.HeadViewAngle:Remove() end
+    if data.Object.Arrow then data.Object.Arrow:Remove() end
+    
+    self.Players[player] = nil
+end
+
+-- Update ESP settings
 function ESP:UpdateSettings(newSettings)
     for setting, value in pairs(newSettings) do
         if self.Settings[setting] ~= nil then
@@ -109,8 +210,6 @@ function ESP:UpdateSettings(newSettings)
                 self.Settings[setting] = math.clamp(value, 1, 5)
             elseif setting == "TextSize" then
                 self.Settings[setting] = math.clamp(value, 1, 24)
-            elseif setting == "TextFont" then
-                self.Settings[setting] = math.clamp(value, 1, 5)
             elseif setting == "BoxHeight" then
                 self.Settings[setting] = math.clamp(value, 1, 20)
             elseif setting == "BoxWidth" then
@@ -124,19 +223,24 @@ function ESP:UpdateSettings(newSettings)
     end
 end
 
--- Get team color based on settings
+-- Get font from setting
+function ESP:GetFont()
+    return self.FontMap[self.Settings.TextFont] or Enum.Font.Roboto
+end
+
+-- Get team color
 function ESP:GetTeamColor(player)
     if not self.Settings.TeamColor then 
-        return self.Settings.BoxColor -- Use custom color if team color is disabled
+        return self.Settings.BoxColor
     end
     
     local localPlayer = Players.LocalPlayer
-    if not localPlayer then return self.Colors.Neutral end
+    if not localPlayer then return self.Settings.BoxColor end
     
     if player.Team == localPlayer.Team then
-        return self.Colors.Ally
+        return Color3.new(0, 1, 0)  -- Ally green
     else
-        return self.Colors.Enemy
+        return Color3.new(1, 0, 0)  -- Enemy red
     end
 end
 
@@ -151,23 +255,24 @@ function ESP:Toggle(state)
     self.Settings.Enabled = state
     if not state then
         -- Clear all ESP when disabling
-        for _, data in pairs(self.Players) do
-            if data.Object.Highlight then
-                data.Object.Highlight.Enabled = false
+        for player, data in pairs(self.Players) do
+            local objects = data.Object
+            if objects.Highlight then
+                objects.Highlight.Enabled = false
             end
-            data.Object.Box.Visible = false
-            data.Object.HealthBar.Visible = false
-            data.Object.HealthBarOutline.Visible = false
-            data.Object.Text.Visible = false
-            data.Object.Tracer.Visible = false
-            data.Object.ViewAngle.Visible = false
-            data.Object.HeadViewAngle.Visible = false
-            data.Object.Arrow.Visible = false
+            if objects.Box then objects.Box.Visible = false end
+            if objects.HealthBar then objects.HealthBar.Visible = false end
+            if objects.HealthBarOutline then objects.HealthBarOutline.Visible = false end
+            if objects.Text then objects.Text.Visible = false end
+            if objects.Tracer then objects.Tracer.Visible = false end
+            if objects.ViewAngle then objects.ViewAngle.Visible = false end
+            if objects.HeadViewAngle then objects.HeadViewAngle.Visible = false end
+            if objects.Arrow then objects.Arrow.Visible = false end
         end
     end
 end
 
--- Calculate proper bounding box with configurable size
+-- Calculate bounding box
 function ESP:CalculateBoundingBox(character)
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     local head = character:FindFirstChild("Head")
@@ -209,6 +314,15 @@ function ESP:CalculateBoundingBox(character)
     return position, size
 end
 
+-- Safe drawing object access
+local function safeSetDrawing(obj, property, value)
+    if obj then
+        pcall(function()
+            obj[property] = value
+        end)
+    end
+end
+
 -- Update ESP visuals
 function ESP:Update()
     if not self.Settings.Enabled then return end
@@ -220,12 +334,43 @@ function ESP:Update()
         local character = player.Character
         local objects = data.Object
         
-        if character and player ~= localPlayer and self:ShouldShow(player) then
+        -- Skip if player is invalid or dead
+        if not character or not character.Parent then
+            if objects.Highlight then
+                objects.Highlight.Enabled = false
+            end
+            safeSetDrawing(objects.Box, "Visible", false)
+            safeSetDrawing(objects.HealthBar, "Visible", false)
+            safeSetDrawing(objects.HealthBarOutline, "Visible", false)
+            safeSetDrawing(objects.Text, "Visible", false)
+            safeSetDrawing(objects.Tracer, "Visible", false)
+            safeSetDrawing(objects.ViewAngle, "Visible", false)
+            safeSetDrawing(objects.HeadViewAngle, "Visible", false)
+            safeSetDrawing(objects.Arrow, "Visible", false)
+            goto continue
+        end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then
+            if objects.Highlight then
+                objects.Highlight.Enabled = false
+            end
+            safeSetDrawing(objects.Box, "Visible", false)
+            safeSetDrawing(objects.HealthBar, "Visible", false)
+            safeSetDrawing(objects.HealthBarOutline, "Visible", false)
+            safeSetDrawing(objects.Text, "Visible", false)
+            safeSetDrawing(objects.Tracer, "Visible", false)
+            safeSetDrawing(objects.ViewAngle, "Visible", false)
+            safeSetDrawing(objects.HeadViewAngle, "Visible", false)
+            safeSetDrawing(objects.Arrow, "Visible", false)
+            goto continue
+        end
+        
+        if player ~= localPlayer and self:ShouldShow(player) then
             local rootPart = character:FindFirstChild("HumanoidRootPart")
             local head = character:FindFirstChild("Head")
-            local humanoid = character:FindFirstChild("Humanoid")
             
-            if rootPart and humanoid and head then
+            if rootPart and head then
                 local rootPos, rootOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
                 local headPos, headOnScreen = Camera:WorldToViewportPoint(head.Position)
                 local distance = (rootPart.Position - cameraPos).Magnitude
@@ -233,11 +378,12 @@ function ESP:Update()
                 
                 if distance <= self.Settings.MaxDistance then
                     -- Chams
-                    if self.Settings.Chams then
+                    if self.Settings.Chams and objects.Highlight then
                         objects.Highlight.Adornee = character
                         objects.Highlight.Enabled = true
                         objects.Highlight.FillColor = teamColor
-                    else
+                        objects.Highlight.OutlineColor = Color3.new(0, 0, 0)
+                    elseif objects.Highlight then
                         objects.Highlight.Enabled = false
                     end
                     
@@ -247,97 +393,96 @@ function ESP:Update()
                         
                         if boxPos and boxSize then
                             -- Box
-                            if self.Settings.Box then
-                                objects.Box.Visible = true
-                                objects.Box.Size = boxSize
-                                objects.Box.Position = boxPos
-                                objects.Box.Color = teamColor
-                            else
-                                objects.Box.Visible = false
+                            if self.Settings.Box and objects.Box then
+                                safeSetDrawing(objects.Box, "Visible", true)
+                                safeSetDrawing(objects.Box, "Size", boxSize)
+                                safeSetDrawing(objects.Box, "Position", boxPos)
+                                safeSetDrawing(objects.Box, "Color", teamColor)
+                            elseif objects.Box then
+                                safeSetDrawing(objects.Box, "Visible", false)
                             end
                             
                             -- Health Bar
-                            if self.Settings.HealthBar then
+                            if self.Settings.HealthBar and objects.HealthBar and objects.HealthBarOutline then
                                 local healthPercent = humanoid.Health / humanoid.MaxHealth
                                 local barHeight = boxSize.Y
                                 local barWidth = 4
                                 
                                 -- Outline
-                                objects.HealthBarOutline.Visible = self.Settings.Outline
-                                objects.HealthBarOutline.Size = Vector2.new(barWidth, barHeight)
-                                objects.HealthBarOutline.Position = boxPos - Vector2.new(6, 0)
-                                objects.HealthBarOutline.Color = Color3.new(0, 0, 0)
+                                safeSetDrawing(objects.HealthBarOutline, "Visible", self.Settings.Outline)
+                                safeSetDrawing(objects.HealthBarOutline, "Size", Vector2.new(barWidth, barHeight))
+                                safeSetDrawing(objects.HealthBarOutline, "Position", boxPos - Vector2.new(6, 0))
+                                safeSetDrawing(objects.HealthBarOutline, "Color", Color3.new(0, 0, 0))
                                 
                                 -- Fill
-                                objects.HealthBar.Visible = true
-                                objects.HealthBar.Size = Vector2.new(barWidth - 2, barHeight * healthPercent - 2)
-                                objects.HealthBar.Position = objects.HealthBarOutline.Position + 
-                                    Vector2.new(1, 1 + barHeight * (1 - healthPercent))
-                                objects.HealthBar.Color = self.Settings.HealthBarColor:Lerp(
-                                    Color3.new(1, 0, 0), 
-                                    1 - healthPercent
-                                )
-                            else
-                                objects.HealthBar.Visible = false
-                                objects.HealthBarOutline.Visible = false
+                                safeSetDrawing(objects.HealthBar, "Visible", true)
+                                safeSetDrawing(objects.HealthBar, "Size", Vector2.new(barWidth - 2, barHeight * healthPercent - 2))
+                                safeSetDrawing(objects.HealthBar, "Position", objects.HealthBarOutline.Position + Vector2.new(1, 1 + barHeight * (1 - healthPercent)))
+                                safeSetDrawing(objects.HealthBar, "Color", self.Settings.HealthBarColor:Lerp(Color3.new(1, 0, 0), 1 - healthPercent))
+                            elseif objects.HealthBar and objects.HealthBarOutline then
+                                safeSetDrawing(objects.HealthBar, "Visible", false)
+                                safeSetDrawing(objects.HealthBarOutline, "Visible", false)
                             end
                             
                             -- Text
-                            if self.Settings.Text then
-                                objects.Text.Visible = true
-                                objects.Text.Text = string.format("%s [%dm]", player.Name, math.floor(distance))
-                                objects.Text.Position = Vector2.new(
-                                    boxPos.X + boxSize.X / 2,
-                                    boxPos.Y - 20
-                                )
-                                objects.Text.Size = self.Settings.TextSize
-                                objects.Text.Font = self.Fonts[self.Settings.TextFont]
-                                objects.Text.Color = self.Settings.TextColor
-                            else
-                                objects.Text.Visible = false
+                            if self.Settings.Text and objects.Text then
+                                safeSetDrawing(objects.Text, "Visible", true)
+                                safeSetDrawing(objects.Text, "Text", string.format("%s [%dm]", player.Name, math.floor(distance)))
+                                safeSetDrawing(objects.Text, "Position", Vector2.new(boxPos.X + boxSize.X / 2, boxPos.Y - 20))
+                                safeSetDrawing(objects.Text, "Size", self.Settings.TextSize)
+                                safeSetDrawing(objects.Text, "Font", self:GetFont())
+                                safeSetDrawing(objects.Text, "Color", self.Settings.TextColor)
+                            elseif objects.Text then
+                                safeSetDrawing(objects.Text, "Visible", false)
                             end
                         end
                         
                         -- Tracer
-                        if self.Settings.Tracer then
-                            objects.Tracer.Visible = true
-                            objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                            objects.Tracer.To = Vector2.new(rootPos.X, rootPos.Y)
-                            objects.Tracer.Color = self.Settings.TracerColor
-                        else
-                            objects.Tracer.Visible = false
+                        if self.Settings.Tracer and objects.Tracer then
+                            safeSetDrawing(objects.Tracer, "Visible", true)
+                            safeSetDrawing(objects.Tracer, "From", Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y))
+                            safeSetDrawing(objects.Tracer, "To", Vector2.new(rootPos.X, rootPos.Y))
+                            safeSetDrawing(objects.Tracer, "Color", self.Settings.TracerColor)
+                        elseif objects.Tracer then
+                            safeSetDrawing(objects.Tracer, "Visible", false)
                         end
                         
                         -- View Angle (from torso)
-                        if self.Settings.ViewAngle then
-                            objects.ViewAngle.Visible = true
+                        if self.Settings.ViewAngle and objects.ViewAngle then
+                            safeSetDrawing(objects.ViewAngle, "Visible", true)
                             local lookDir = rootPart.CFrame.LookVector * 5
                             local lookEnd = Camera:WorldToViewportPoint(rootPart.Position + lookDir)
-                            objects.ViewAngle.From = Vector2.new(rootPos.X, rootPos.Y)
-                            objects.ViewAngle.To = Vector2.new(lookEnd.X, lookEnd.Y)
-                            objects.ViewAngle.Color = self.Settings.ViewAngleColor
-                        else
-                            objects.ViewAngle.Visible = false
+                            if lookEnd then
+                                safeSetDrawing(objects.ViewAngle, "From", Vector2.new(rootPos.X, rootPos.Y))
+                                safeSetDrawing(objects.ViewAngle, "To", Vector2.new(lookEnd.X, lookEnd.Y))
+                                safeSetDrawing(objects.ViewAngle, "Color", self.Settings.ViewAngleColor)
+                            end
+                        elseif objects.ViewAngle then
+                            safeSetDrawing(objects.ViewAngle, "Visible", false)
                         end
                         
-                        -- Head View Angle (new)
-                        if self.Settings.HeadViewAngle then
-                            objects.HeadViewAngle.Visible = true
+                        -- Head View Angle
+                        if self.Settings.HeadViewAngle and objects.HeadViewAngle then
+                            safeSetDrawing(objects.HeadViewAngle, "Visible", true)
                             local headLookDir = head.CFrame.LookVector * 3
                             local headLookEnd = Camera:WorldToViewportPoint(head.Position + headLookDir)
-                            objects.HeadViewAngle.From = Vector2.new(headPos.X, headPos.Y)
-                            objects.HeadViewAngle.To = Vector2.new(headLookEnd.X, headLookEnd.Y)
-                            objects.HeadViewAngle.Color = self.Settings.HeadViewAngleColor
-                        else
-                            objects.HeadViewAngle.Visible = false
+                            if headLookEnd then
+                                safeSetDrawing(objects.HeadViewAngle, "From", Vector2.new(headPos.X, headPos.Y))
+                                safeSetDrawing(objects.HeadViewAngle, "To", Vector2.new(headLookEnd.X, headLookEnd.Y))
+                                safeSetDrawing(objects.HeadViewAngle, "Color", self.Settings.HeadViewAngleColor)
+                            end
+                        elseif objects.HeadViewAngle then
+                            safeSetDrawing(objects.HeadViewAngle, "Visible", false)
                         end
                         
                         -- Hide off-screen elements
-                        objects.Arrow.Visible = false
+                        if objects.Arrow then
+                            safeSetDrawing(objects.Arrow, "Visible", false)
+                        end
                     else
                         -- Off-screen arrow
-                        if self.Settings.OffScreenArrow then
-                            objects.Arrow.Visible = true
+                        if self.Settings.OffScreenArrow and objects.Arrow then
+                            safeSetDrawing(objects.Arrow, "Visible", true)
                             
                             local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
                             local dir = (rootPart.Position - cameraPos).Unit
@@ -357,50 +502,67 @@ function ESP:Update()
                                 pos + Vector2.new(math.cos(angle - 2.5) * size, math.sin(angle - 2.5) * size)
                             }
                             
-                            objects.Arrow.PointA = points[1]
-                            objects.Arrow.PointB = points[2]
-                            objects.Arrow.PointC = points[3]
-                            objects.Arrow.Color = self.Settings.ArrowColor
-                        else
-                            objects.Arrow.Visible = false
+                            safeSetDrawing(objects.Arrow, "PointA", points[1])
+                            safeSetDrawing(objects.Arrow, "PointB", points[2])
+                            safeSetDrawing(objects.Arrow, "PointC", points[3])
+                            safeSetDrawing(objects.Arrow, "Color", self.Settings.ArrowColor)
+                        elseif objects.Arrow then
+                            safeSetDrawing(objects.Arrow, "Visible", false)
                         end
                         
                         -- Hide on-screen elements
-                        objects.Box.Visible = false
-                        objects.HealthBar.Visible = false
-                        objects.HealthBarOutline.Visible = false
-                        objects.Text.Visible = false
-                        objects.Tracer.Visible = false
-                        objects.ViewAngle.Visible = false
-                        objects.HeadViewAngle.Visible = false
+                        safeSetDrawing(objects.Box, "Visible", false)
+                        safeSetDrawing(objects.HealthBar, "Visible", false)
+                        safeSetDrawing(objects.HealthBarOutline, "Visible", false)
+                        safeSetDrawing(objects.Text, "Visible", false)
+                        safeSetDrawing(objects.Tracer, "Visible", false)
+                        safeSetDrawing(objects.ViewAngle, "Visible", false)
+                        safeSetDrawing(objects.HeadViewAngle, "Visible", false)
                     end
                 else
                     -- Out of range - hide all
-                    objects.Highlight.Enabled = false
-                    objects.Box.Visible = false
-                    objects.HealthBar.Visible = false
-                    objects.HealthBarOutline.Visible = false
-                    objects.Text.Visible = false
-                    objects.Tracer.Visible = false
-                    objects.ViewAngle.Visible = false
-                    objects.HeadViewAngle.Visible = false
-                    objects.Arrow.Visible = false
+                    if objects.Highlight then
+                        objects.Highlight.Enabled = false
+                    end
+                    safeSetDrawing(objects.Box, "Visible", false)
+                    safeSetDrawing(objects.HealthBar, "Visible", false)
+                    safeSetDrawing(objects.HealthBarOutline, "Visible", false)
+                    safeSetDrawing(objects.Text, "Visible", false)
+                    safeSetDrawing(objects.Tracer, "Visible", false)
+                    safeSetDrawing(objects.ViewAngle, "Visible", false)
+                    safeSetDrawing(objects.HeadViewAngle, "Visible", false)
+                    safeSetDrawing(objects.Arrow, "Visible", false)
                 end
+            else
+                -- Missing parts - hide all
+                if objects.Highlight then
+                    objects.Highlight.Enabled = false
+                end
+                safeSetDrawing(objects.Box, "Visible", false)
+                safeSetDrawing(objects.HealthBar, "Visible", false)
+                safeSetDrawing(objects.HealthBarOutline, "Visible", false)
+                safeSetDrawing(objects.Text, "Visible", false)
+                safeSetDrawing(objects.Tracer, "Visible", false)
+                safeSetDrawing(objects.ViewAngle, "Visible", false)
+                safeSetDrawing(objects.HeadViewAngle, "Visible", false)
+                safeSetDrawing(objects.Arrow, "Visible", false)
             end
         else
             -- Player not valid - hide all
             if objects.Highlight then
                 objects.Highlight.Enabled = false
             end
-            objects.Box.Visible = false
-            objects.HealthBar.Visible = false
-            objects.HealthBarOutline.Visible = false
-            objects.Text.Visible = false
-            objects.Tracer.Visible = false
-            objects.ViewAngle.Visible = false
-            objects.HeadViewAngle.Visible = false
-            objects.Arrow.Visible = false
+            safeSetDrawing(objects.Box, "Visible", false)
+            safeSetDrawing(objects.HealthBar, "Visible", false)
+            safeSetDrawing(objects.HealthBarOutline, "Visible", false)
+            safeSetDrawing(objects.Text, "Visible", false)
+            safeSetDrawing(objects.Tracer, "Visible", false)
+            safeSetDrawing(objects.ViewAngle, "Visible", false)
+            safeSetDrawing(objects.HeadViewAngle, "Visible", false)
+            safeSetDrawing(objects.Arrow, "Visible", false)
         end
+        
+        ::continue::
     end
 end
 
@@ -415,26 +577,14 @@ function ESP:Init()
     
     -- Set up new players
     Players.PlayerAdded:Connect(function(player)
-        self:Create(player)
+        if player ~= Players.LocalPlayer then
+            self:Create(player)
+        end
     end)
     
     -- Clean up leaving players
     Players.PlayerRemoving:Connect(function(player)
-        local data = self.Players[player]
-        if data then
-            if data.Object.Highlight then
-                data.Object.Highlight:Destroy()
-            end
-            data.Object.Box:Remove()
-            data.Object.HealthBar:Remove()
-            data.Object.HealthBarOutline:Remove()
-            data.Object.Text:Remove()
-            data.Object.Tracer:Remove()
-            data.Object.ViewAngle:Remove()
-            data.Object.HeadViewAngle:Remove()
-            data.Object.Arrow:Remove()
-            self.Players[player] = nil
-        end
+        self:RemovePlayer(player)
     end)
     
     -- Start update loop
