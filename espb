@@ -1,4 +1,4 @@
--- Enhanced ESP Library with Head View Angles and Box Size Control
+-- Enhanced ESP Library with Head View Angles, Box Size Control, and Glow Chams
 local ESP = {Players = {}}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -8,12 +8,13 @@ local Camera = workspace.CurrentCamera
 ESP.Settings = {
     Enabled = true,
     Chams = false,
+    GlowChams = true,  -- New: Glow chams setting
     Box = true,
     HealthBar = true,
     Text = true,
     Tracer = false,
     ViewAngle = false,
-    HeadViewAngle = true,  -- New: Head view angle
+    HeadViewAngle = true,
     OffScreenArrow = false,
     Outline = false,
     BoldText = false,
@@ -26,15 +27,19 @@ ESP.Settings = {
     TeamColor = true,
     BoxColor = Color3.new(1, 0, 0),
     ChamsColor = Color3.new(1, 0, 0),
+    GlowChamsColor = Color3.new(1, 0.5, 0),  -- New: Glow chams color (orange by default)
     TextColor = Color3.new(1, 1, 1),
     TracerColor = Color3.new(1, 1, 0),
     ViewAngleColor = Color3.new(0, 0.6, 1),
-    HeadViewAngleColor = Color3.new(1, 0.5, 0),  -- New: Head view angle color
+    HeadViewAngleColor = Color3.new(1, 0.5, 0),
     ArrowColor = Color3.new(1, 0, 0),
     HealthBarColor = Color3.new(0, 1, 0),
-    BoxHeight = 6,  -- Default box height in studs
-    BoxWidth = 20,   -- Default box width in studs
-    BoxScale = 1.0  -- Box size multiplier
+    BoxHeight = 6,
+    BoxWidth = 20,
+    BoxScale = 1.0,
+    GlowIntensity = 5,  -- New: Controls glow intensity
+    GlowRadius = 20,    -- New: Controls glow radius/size
+    GlowTransparency = 0.3  -- New: Controls glow transparency
 }
 
 -- Font mapping
@@ -60,12 +65,19 @@ function ESP:Create(player)
     local objects = {}
     self.Players[player] = {Object = objects, Player = player}
     
-    -- Chams Highlight
+    -- Regular Chams Highlight
     objects.Highlight = Instance.new("Highlight")
     objects.Highlight.Name = player.Name.."_Chams"
     objects.Highlight.OutlineTransparency = 1
     objects.Highlight.FillTransparency = 0.5
     objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    
+    -- Glow Chams (new)
+    objects.GlowChams = Instance.new("Highlight")
+    objects.GlowChams.Name = player.Name.."_GlowChams"
+    objects.GlowChams.OutlineTransparency = 1
+    objects.GlowChams.FillTransparency = 0.7  -- More transparent by default
+    objects.GlowChams.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     
     -- Box
     objects.Box = Drawing.new("Square")
@@ -89,7 +101,7 @@ function ESP:Create(player)
     objects.ViewAngle = Drawing.new("Line")
     objects.ViewAngle.Thickness = 2
     
-    -- Head View Angle (new)
+    -- Head View Angle
     objects.HeadViewAngle = Drawing.new("Line")
     objects.HeadViewAngle.Thickness = 2
     
@@ -117,6 +129,12 @@ function ESP:UpdateSettings(newSettings)
                 self.Settings[setting] = math.clamp(value, 1, 20)
             elseif setting == "BoxScale" then
                 self.Settings[setting] = math.clamp(value, 0.1, 3)
+            elseif setting == "GlowIntensity" then
+                self.Settings[setting] = math.clamp(value, 1, 10)
+            elseif setting == "GlowRadius" then
+                self.Settings[setting] = math.clamp(value, 5, 50)
+            elseif setting == "GlowTransparency" then
+                self.Settings[setting] = math.clamp(value, 0, 1)
             else
                 self.Settings[setting] = value
             end
@@ -127,7 +145,7 @@ end
 -- Get team color based on settings
 function ESP:GetTeamColor(player)
     if not self.Settings.TeamColor then 
-        return self.Settings.BoxColor -- Use custom color if team color is disabled
+        return self.Settings.BoxColor
     end
     
     local localPlayer = Players.LocalPlayer
@@ -154,6 +172,9 @@ function ESP:Toggle(state)
         for _, data in pairs(self.Players) do
             if data.Object.Highlight then
                 data.Object.Highlight.Enabled = false
+            end
+            if data.Object.GlowChams then
+                data.Object.GlowChams.Enabled = false
             end
             data.Object.Box.Visible = false
             data.Object.HealthBar.Visible = false
@@ -193,7 +214,7 @@ function ESP:CalculateBoundingBox(character)
     local bottomScreen = Vector2.new(bottomScreenPos.X, bottomScreenPos.Y)
     
     -- Calculate box size based on distance
-    local distanceFactor = 1 / (topScreenPos.Z + 0.0001) -- Avoid division by zero
+    local distanceFactor = 1 / (topScreenPos.Z + 0.0001)
     local scaledWidth = width * distanceFactor * 100
     
     local size = Vector2.new(
@@ -207,6 +228,28 @@ function ESP:CalculateBoundingBox(character)
     )
     
     return position, size
+end
+
+-- Update glow chams properties
+function ESP:UpdateGlowChams(objects, character, teamColor)
+    if not objects.GlowChams then return end
+    
+    objects.GlowChams.Adornee = character
+    objects.GlowChams.Enabled = self.Settings.GlowChams
+    
+    if self.Settings.GlowChams then
+        -- Apply glow effect using highlight properties
+        objects.GlowChams.FillColor = self.Settings.GlowChamsColor
+        objects.GlowChams.FillTransparency = self.Settings.GlowTransparency
+        
+        -- Simulate glow effect using multiple highlights or enhanced properties
+        -- For a more advanced glow, you might need to use multiple highlights with different sizes
+        -- This is a simplified version using the built-in highlight properties
+        
+        -- You can adjust these based on glow intensity
+        local intensity = self.Settings.GlowIntensity / 10
+        objects.GlowChams.FillTransparency = 0.7 - (intensity * 0.3)
+    end
 end
 
 -- Update ESP visuals
@@ -232,7 +275,7 @@ function ESP:Update()
                 local teamColor = self:GetTeamColor(player)
                 
                 if distance <= self.Settings.MaxDistance then
-                    -- Chams
+                    -- Regular Chams
                     if self.Settings.Chams then
                         objects.Highlight.Adornee = character
                         objects.Highlight.Enabled = true
@@ -240,6 +283,9 @@ function ESP:Update()
                     else
                         objects.Highlight.Enabled = false
                     end
+                    
+                    -- Glow Chams (new)
+                    self:UpdateGlowChams(objects, character, teamColor)
                     
                     if rootOnScreen then
                         -- Calculate proper bounding box
@@ -320,7 +366,7 @@ function ESP:Update()
                             objects.ViewAngle.Visible = false
                         end
                         
-                        -- Head View Angle (new)
+                        -- Head View Angle
                         if self.Settings.HeadViewAngle then
                             objects.HeadViewAngle.Visible = true
                             local headLookDir = head.CFrame.LookVector * 3
@@ -377,6 +423,7 @@ function ESP:Update()
                 else
                     -- Out of range - hide all
                     objects.Highlight.Enabled = false
+                    objects.GlowChams.Enabled = false
                     objects.Box.Visible = false
                     objects.HealthBar.Visible = false
                     objects.HealthBarOutline.Visible = false
@@ -391,6 +438,9 @@ function ESP:Update()
             -- Player not valid - hide all
             if objects.Highlight then
                 objects.Highlight.Enabled = false
+            end
+            if objects.GlowChams then
+                objects.GlowChams.Enabled = false
             end
             objects.Box.Visible = false
             objects.HealthBar.Visible = false
@@ -424,6 +474,9 @@ function ESP:Init()
         if data then
             if data.Object.Highlight then
                 data.Object.Highlight:Destroy()
+            end
+            if data.Object.GlowChams then
+                data.Object.GlowChams:Destroy()
             end
             data.Object.Box:Remove()
             data.Object.HealthBar:Remove()
