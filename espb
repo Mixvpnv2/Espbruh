@@ -1,4 +1,4 @@
--- Enhanced ESP Library with Head View Angles, Box Size Control, and Glow Chams
+-- Enhanced ESP Library with Head View Angles, Box Size Control, Glow Chams, and Death Fading
 local ESP = {Players = {}}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -8,7 +8,7 @@ local Camera = workspace.CurrentCamera
 ESP.Settings = {
     Enabled = true,
     Chams = false,
-    GlowChams = true,  -- New: Glow chams setting
+    GlowChams = true,
     Box = true,
     HealthBar = true,
     Text = true,
@@ -27,7 +27,7 @@ ESP.Settings = {
     TeamColor = true,
     BoxColor = Color3.new(1, 0, 0),
     ChamsColor = Color3.new(1, 0, 0),
-    GlowChamsColor = Color3.new(1, 0.5, 0),  -- New: Glow chams color (orange by default)
+    GlowChamsColor = Color3.new(1, 0.5, 0),
     TextColor = Color3.new(1, 1, 1),
     TracerColor = Color3.new(1, 1, 0),
     ViewAngleColor = Color3.new(0, 0.6, 1),
@@ -37,9 +37,10 @@ ESP.Settings = {
     BoxHeight = 6,
     BoxWidth = 20,
     BoxScale = 1.0,
-    GlowIntensity = 5,  -- New: Controls glow intensity
-    GlowRadius = 20,    -- New: Controls glow radius/size
-    GlowTransparency = 0.3  -- New: Controls glow transparency
+    GlowIntensity = 5,
+    GlowRadius = 20,
+    GlowTransparency = 0.3,
+    FadeDuration = 3 -- New: How long it takes for ESP to disappear after death
 }
 
 -- Font mapping
@@ -63,7 +64,13 @@ function ESP:Create(player)
     if self.Players[player] then return end
     
     local objects = {}
-    self.Players[player] = {Object = objects, Player = player}
+    self.Players[player] = {
+        Object = objects, 
+        Player = player,
+        IsDead = false,
+        DeathTime = 0,
+        FadeProgress = 1 -- 1 = fully visible, 0 = fully invisible
+    }
     
     -- Regular Chams Highlight
     objects.Highlight = Instance.new("Highlight")
@@ -71,13 +78,15 @@ function ESP:Create(player)
     objects.Highlight.OutlineTransparency = 1
     objects.Highlight.FillTransparency = 0.5
     objects.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    objects.Highlight.Parent = game.CoreGui
     
-    -- Glow Chams (new)
+    -- Glow Chams (improved)
     objects.GlowChams = Instance.new("Highlight")
     objects.GlowChams.Name = player.Name.."_GlowChams"
     objects.GlowChams.OutlineTransparency = 1
-    objects.GlowChams.FillTransparency = 0.7  -- More transparent by default
+    objects.GlowChams.FillTransparency = 0.7
     objects.GlowChams.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    objects.GlowChams.Parent = game.CoreGui
     
     -- Box
     objects.Box = Drawing.new("Square")
@@ -135,6 +144,8 @@ function ESP:UpdateSettings(newSettings)
                 self.Settings[setting] = math.clamp(value, 5, 50)
             elseif setting == "GlowTransparency" then
                 self.Settings[setting] = math.clamp(value, 0, 1)
+            elseif setting == "FadeDuration" then
+                self.Settings[setting] = math.clamp(value, 0.1, 10)
             else
                 self.Settings[setting] = value
             end
@@ -162,6 +173,68 @@ end
 function ESP:ShouldShow(player)
     if not self.Settings.TeamCheck then return true end
     return player.Team ~= Players.LocalPlayer.Team
+end
+
+-- Update death status and start fade if needed
+function ESP:UpdateDeathStatus(player, data, humanoid)
+    local wasDead = data.IsDead
+    local isDeadNow = humanoid.Health <= 0
+    
+    if isDeadNow and not wasDead then
+        -- Player just died
+        data.IsDead = true
+        data.DeathTime = tick()
+        data.FadeProgress = 1
+    elseif not isDeadNow and wasDead then
+        -- Player respawned
+        data.IsDead = false
+        data.FadeProgress = 1
+    end
+    
+    -- Update fade progress if dead
+    if data.IsDead then
+        local timeSinceDeath = tick() - data.DeathTime
+        data.FadeProgress = math.max(0, 1 - (timeSinceDeath / self.Settings.FadeDuration))
+    end
+end
+
+-- Apply fade effect to drawing objects
+function ESP:ApplyFadeEffect(objects, fadeProgress)
+    local alpha = fadeProgress
+    
+    -- Apply transparency to drawing objects
+    if objects.Box then
+        objects.Box.Transparency = 1 - (alpha * 0.8)
+    end
+    if objects.HealthBar then
+        objects.HealthBar.Transparency = 1 - (alpha * 0.8)
+    end
+    if objects.HealthBarOutline then
+        objects.HealthBarOutline.Transparency = 1 - (alpha * 0.8)
+    end
+    if objects.Text then
+        objects.Text.Transparency = 1 - (alpha * 0.8)
+    end
+    if objects.Tracer then
+        objects.Tracer.Transparency = 1 - (alpha * 0.8)
+    end
+    if objects.ViewAngle then
+        objects.ViewAngle.Transparency = 1 - (alpha * 0.8)
+    end
+    if objects.HeadViewAngle then
+        objects.HeadViewAngle.Transparency = 1 - (alpha * 0.8)
+    end
+    if objects.Arrow then
+        objects.Arrow.Transparency = 1 - (alpha * 0.8)
+    end
+    
+    -- Apply transparency to highlights
+    if objects.Highlight then
+        objects.Highlight.FillTransparency = 0.5 + (0.5 * (1 - alpha))
+    end
+    if objects.GlowChams then
+        objects.GlowChams.FillTransparency = 0.7 + (0.3 * (1 - alpha))
+    end
 end
 
 -- Toggle ESP
@@ -230,25 +303,33 @@ function ESP:CalculateBoundingBox(character)
     return position, size
 end
 
--- Update glow chams properties
-function ESP:UpdateGlowChams(objects, character, teamColor)
+-- Update glow chams properties (fixed)
+function ESP:UpdateGlowChams(objects, character, teamColor, fadeProgress)
     if not objects.GlowChams then return end
     
     objects.GlowChams.Adornee = character
-    objects.GlowChams.Enabled = self.Settings.GlowChams
+    objects.GlowChams.Enabled = self.Settings.GlowChams and fadeProgress > 0
     
-    if self.Settings.GlowChams then
-        -- Apply glow effect using highlight properties
-        objects.GlowChams.FillColor = self.Settings.GlowChamsColor
-        objects.GlowChams.FillTransparency = self.Settings.GlowTransparency
-        
-        -- Simulate glow effect using multiple highlights or enhanced properties
-        -- For a more advanced glow, you might need to use multiple highlights with different sizes
-        -- This is a simplified version using the built-in highlight properties
-        
-        -- You can adjust these based on glow intensity
+    if self.Settings.GlowChams and fadeProgress > 0 then
+        -- Enhanced glow effect
         local intensity = self.Settings.GlowIntensity / 10
-        objects.GlowChams.FillTransparency = 0.7 - (intensity * 0.3)
+        local baseColor = self.Settings.GlowChamsColor
+        
+        -- Create a more vibrant glow effect
+        local glowColor = Color3.new(
+            math.min(1, baseColor.R * intensity),
+            math.min(1, baseColor.G * intensity),
+            math.min(1, baseColor.B * intensity)
+        )
+        
+        objects.GlowChams.FillColor = glowColor
+        objects.GlowChams.FillTransparency = self.Settings.GlowTransparency + (0.3 * (1 - fadeProgress))
+        
+        -- Add outline for better glow effect
+        objects.GlowChams.OutlineColor = glowColor
+        objects.GlowChams.OutlineTransparency = 0.7 * (1 - fadeProgress)
+    else
+        objects.GlowChams.Enabled = false
     end
 end
 
@@ -269,12 +350,18 @@ function ESP:Update()
             local humanoid = character:FindFirstChild("Humanoid")
             
             if rootPart and humanoid and head then
+                -- Update death status and fade progress
+                self:UpdateDeathStatus(player, data, humanoid)
+                
                 local rootPos, rootOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
                 local headPos, headOnScreen = Camera:WorldToViewportPoint(head.Position)
                 local distance = (rootPart.Position - cameraPos).Magnitude
                 local teamColor = self:GetTeamColor(player)
                 
-                if distance <= self.Settings.MaxDistance then
+                if distance <= self.Settings.MaxDistance and data.FadeProgress > 0 then
+                    -- Apply fade effect to all objects
+                    self:ApplyFadeEffect(objects, data.FadeProgress)
+                    
                     -- Regular Chams
                     if self.Settings.Chams then
                         objects.Highlight.Adornee = character
@@ -284,8 +371,8 @@ function ESP:Update()
                         objects.Highlight.Enabled = false
                     end
                     
-                    -- Glow Chams (new)
-                    self:UpdateGlowChams(objects, character, teamColor)
+                    -- Glow Chams (fixed)
+                    self:UpdateGlowChams(objects, character, teamColor, data.FadeProgress)
                     
                     if rootOnScreen then
                         -- Calculate proper bounding box
@@ -331,7 +418,8 @@ function ESP:Update()
                             -- Text
                             if self.Settings.Text then
                                 objects.Text.Visible = true
-                                objects.Text.Text = string.format("%s [%dm]", player.Name, math.floor(distance))
+                                local statusText = data.IsDead and "[DEAD] " or ""
+                                objects.Text.Text = string.format("%s%s [%dm]", statusText, player.Name, math.floor(distance))
                                 objects.Text.Position = Vector2.new(
                                     boxPos.X + boxSize.X / 2,
                                     boxPos.Y - 20
@@ -421,7 +509,7 @@ function ESP:Update()
                         objects.HeadViewAngle.Visible = false
                     end
                 else
-                    -- Out of range - hide all
+                    -- Out of range or fully faded - hide all
                     objects.Highlight.Enabled = false
                     objects.GlowChams.Enabled = false
                     objects.Box.Visible = false
